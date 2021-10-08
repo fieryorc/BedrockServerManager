@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// stopHandler - Stop running server.
 type stopHandler struct{}
 
 func initStopHandler(prov Provider) {

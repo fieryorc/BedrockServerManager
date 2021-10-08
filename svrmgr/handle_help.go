@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// helpHandler implements help command.
 type helpHandler struct{}
 
 func initHelpHandler(provider Provider) {

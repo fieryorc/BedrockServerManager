@@ -10,6 +10,7 @@ import (
 	"github.com/golang/glog"
 )
 
+// aliases list
 var aliases = map[string]string{
 	"bs": "backup save",
 	"br": "backup restore",
@@ -22,22 +23,29 @@ var aliases = map[string]string{
 	"@":  "server",
 }
 
-// Plugin interface
+// Handler for the plugins
 type Handler interface {
 	Handle(ctx context.Context, provider Provider, cmd []string) error
 }
 
+// List of all registered handlers
 var handlers = map[string]Handler{}
 
+// Register a handler for given command.
 func Register(cmd string, handler Handler) {
 	glog.Infof("Registering handler for %s", cmd)
 	handlers[cmd] = handler
 }
 
+// ServerManager contains the main server manager logic
 type ServerManager struct {
+	// Maintains the bedrock server info.
+	// Initialized and never nil.
 	serverProcess *Process
 }
 
+// NewServerManager creates a new server manager
+// Should be called only once.
 func NewServerManager() *ServerManager {
 	sm := &ServerManager{}
 	sm.serverProcess = NewProcess(sm, nil)
@@ -45,6 +53,8 @@ func NewServerManager() *ServerManager {
 	return sm
 }
 
+// loadPlugings loads all the plugins in the sytem.
+// New plugin must be registered here.
 func (sm *ServerManager) loadPlugings() {
 	initExitHandler(sm)
 	initHelpHandler(sm)
@@ -56,10 +66,12 @@ func (sm *ServerManager) loadPlugings() {
 	initStatusHandler(sm)
 }
 
+// printHelp - print interactive help message
 func (sm *ServerManager) printHelp() {
 	(&helpHandler{}).Handle(context.Background(), nil, nil)
 }
 
+// Process - sart the main loop
 func (sm *ServerManager) Process(args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 	sm.printHelp()
@@ -67,6 +79,9 @@ func (sm *ServerManager) Process(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Main interactive promt and user input handling.
+	// TODO: Make it so that the server output automatically
+	// reprints the prompt. Also, print server status in the prompt.
 	glog.Infof("handlers = %v", handlers)
 	for {
 		sm.Printf("> ")
@@ -84,6 +99,7 @@ func (sm *ServerManager) Process(args []string) error {
 	}
 }
 
+// handleCommand handles a single command and dispatches to the plugin.
 func (sm *ServerManager) handleCommand(ctx context.Context, cmd string) error {
 	var err error
 	// Expand aliases

@@ -9,6 +9,8 @@ import (
 	"github.com/golang/glog"
 )
 
+// shellCmdHandler implements shell command.
+// Commands will be passed to OS and run (not shell).
 type shellCmdHandler struct{}
 
 func initShellCmdHandler(prov Provider) {

@@ -12,6 +12,7 @@ import (
 	"github.com/golang/glog"
 )
 
+// startHandler - start bedrock server.
 type startHandler struct {
 	bedrockPath string
 }
@@ -26,6 +27,8 @@ func initStartHandler(prov Provider) {
 
 var bedrockPath string
 
+// getBedrockServerPath returns the executable path for the bedrock server.
+// First it looks at the current directory and then looks at the PATH.
 func getBedrockServerPath() string {
 	if bedrockPath == "" {
 		exePath := *bedrockServerExecutable
@@ -45,9 +48,9 @@ func getBedrockServerPath() string {
 		glog.Infof("bedrockPath = %s", bedrockPath)
 	}
 	return bedrockPath
-
 }
 
+// Handle - starts the server and waits for specific marker messages.
 func (h *startHandler) Handle(ctx context.Context, provider Provider, command []string) error {
 	cwd, _ := os.Getwd()
 	cmd := exec.CommandContext(ctx, h.bedrockPath)
@@ -65,18 +68,16 @@ func (h *startHandler) Handle(ctx context.Context, provider Provider, command []
 
 	count := 0
 	for {
-		select {
-		case l, ok := <-ch:
-			if !ok {
-				return fmt.Errorf("failed to start the server")
-			}
-			// Second port message indicates server fully started.
-			if strings.Contains(l, "[INFO] IPv6 supported, port:") {
-				count += 1
-				if count == 2 {
-					glog.Infof("server started successfully")
-					return nil
-				}
+		l, ok := <-ch
+		if !ok {
+			return fmt.Errorf("failed to start the server")
+		}
+		// Second port message indicates server fully started.
+		if strings.Contains(l, "[INFO] IPv6 supported, port:") {
+			count += 1
+			if count == 2 {
+				glog.Infof("server started successfully")
+				return nil
 			}
 		}
 	}

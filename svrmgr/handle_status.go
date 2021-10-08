@@ -4,6 +4,7 @@ import (
 	"context"
 )
 
+// statusHandler implements status command.
 type statusHandler struct{}
 
 func initStatusHandler(provider Provider) {

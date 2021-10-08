@@ -8,6 +8,8 @@ import (
 	"github.com/golang/glog"
 )
 
+// serverCmdHandler implements server commands.
+// All commands will be sent to bedrock server directly.
 type serverCmdHandler struct{}
 
 func initServerCmdHandler(provider Provider) {

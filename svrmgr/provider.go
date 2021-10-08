@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// Provider implements the common functionality required by
+// plugins.
 type Provider interface {
 	Println(str string)
 	Printf(format string, args ...interface{})

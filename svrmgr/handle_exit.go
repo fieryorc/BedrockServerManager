@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// exitHandler implements exit command.
 type exitHandler struct{}
 
 func initExitHandler(provider Provider) {
