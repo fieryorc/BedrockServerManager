@@ -228,6 +228,10 @@ func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []str
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
+	if provider.GetServerProcess().IsRunning() {
+		return fmt.Errorf("cannot clean. server is running")
+	}
+
 	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
 	_, err := h.runCommand(ctxTimeout, h.gitPath, "clean", "-df", "worlds")
 	if err != nil {
