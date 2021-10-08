@@ -1,4 +1,5 @@
-# Minecraft Bedrock Server Manager for windows
+# BedrockServerManager
+Minecraft Bedrock server manager for Windows
 
 This is a simple Minecraft Bedrock server manager. Using this program,
 you can manage your bedrock server and the world.
