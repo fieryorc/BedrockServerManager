@@ -32,15 +32,15 @@ func (sm *ServerManager) Printfln(format string, args ...interface{}) {
 
 // Log output to the console. Usually always visible, and includes timestamp
 func (sm *ServerManager) Log(line string) {
-	fmt.Printf("%s:%s\r\n", time.Now().Local().Format("20060102-15:04:05"), line)
+	fmt.Printf("[%s] %s\r\n", time.Now().Local().Format("20060102-15:04:05"), line)
 }
 
 func (sm *ServerManager) RunCommand(ctx context.Context, cmd string) error {
 	return sm.handleCommand(ctx, cmd)
 }
 
-func (sm *ServerManager) SetServerProcess(sp *exec.Cmd) {
-	sm.serverProcess = NewProcess(sm, sp)
+func (sm *ServerManager) SetServerProcess(cmd *exec.Cmd) {
+	sm.serverProcess.cmd = cmd
 }
 
 func (sm *ServerManager) GetServerProcess() *Process {

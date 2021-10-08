@@ -11,13 +11,18 @@ import (
 )
 
 var aliases = map[string]string{
-	"bf": "backup save",
+	"bs": "backup save",
 	"br": "backup restore",
 	"bl": "backup list",
 	"bp": "backup period",
+	"h":  "help",
 	"e":  "exit",
+	"s":  "status",
+	"$":  "shell",
+	"@":  "server",
 }
 
+// Plugin interface
 type Handler interface {
 	Handle(ctx context.Context, provider Provider, cmd []string) error
 }
@@ -34,38 +39,30 @@ type ServerManager struct {
 }
 
 func NewServerManager() *ServerManager {
-	return &ServerManager{}
+	sm := &ServerManager{}
+	sm.serverProcess = NewProcess(sm, nil)
+	sm.loadPlugings()
+	return sm
+}
+
+func (sm *ServerManager) loadPlugings() {
+	initExitHandler(sm)
+	initHelpHandler(sm)
+	initServerCmdHandler(sm)
+	initShellCmdHandler(sm)
+	initBackupHandler(sm)
+	initStartHandler(sm)
+	initStopHandler(sm)
+	initStatusHandler(sm)
+}
+
+func (sm *ServerManager) printHelp() {
+	(&helpHandler{}).Handle(context.Background(), nil, nil)
 }
 
 func (sm *ServerManager) Process(args []string) error {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf(`Welcome to Minecraft Bedrock Server Manager for Windows.
-
-Syntax:
-	@ COMMAND
-		Send commands minecraft server directly.
-	$ COMMAND
-		Execute the shell command directly and print output.
-	start
-		Start the bedrock server
-	stop
-		Stop the bedrock server
-	exit
-		Exit the server manager shell. If server is running, will be stopped.
-		alias: e
-	backup save [Optional backup message]
-		Take a backup. Specify optional message. 
-		alias: bf
-	backup restore HASH_ID 
-		Restore the backup of hash id
-		alias: br
-	backup list [RECENT_MAX_ITEMS]
-		List backups specifying number of recent items to list.
-		alias: bl
-	backup period INTERVAL_IN_SECONDS
-		Set automatic backup perid. Set to 0 to disable.
-		alias: bp
-`)
+	sm.printHelp()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -101,14 +98,14 @@ func (sm *ServerManager) handleCommand(ctx context.Context, cmd string) error {
 
 	h, ok := handlers[parts[0]]
 	if !ok {
-		glog.Errorf("invalid command '%s'\n", parts[0])
+		sm.Log(fmt.Sprintf("invalid command '%s'\n", parts[0]))
 		return nil
 	}
 
 	glog.Infof("Handler found, invoking")
 	err = h.Handle(ctx, sm, parts)
 	if err != nil {
-		glog.Error(err)
+		sm.Log(err.Error())
 	}
 	return nil
 }

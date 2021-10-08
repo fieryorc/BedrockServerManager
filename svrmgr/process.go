@@ -49,8 +49,10 @@ func (proc *Process) StartReadOutput(c chan string) {
 }
 
 func (proc *Process) EndReadOutput() {
-	close(proc.outputReader)
-	proc.outputReader = nil
+	if proc.outputReader != nil {
+		close(proc.outputReader)
+		proc.outputReader = nil
+	}
 }
 
 func (proc *Process) Start(ctx context.Context, provider Provider) error {
@@ -71,12 +73,21 @@ func (proc *Process) Start(ctx context.Context, provider Provider) error {
 		} else {
 			provider.Log("server exited with success")
 		}
+		proc.EndReadOutput()
 	}()
 	return nil
 }
 
+func (proc *Process) IsRunning() bool {
+	return proc.cmd != nil && proc.cmd.Process != nil && proc.cmd.ProcessState == nil
+}
+
 func (proc *Process) Kill() error {
-	return proc.cmd.Process.Kill()
+	if proc.IsRunning() {
+		glog.Infof("killing bedrock server")
+		return proc.cmd.Process.Kill()
+	}
+	return nil
 }
 
 // Private functions

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/golang/glog"
 )
@@ -17,7 +18,7 @@ type startHandler struct {
 
 var bedrockServerExecutable = flag.String("bedrock_exe", "bedrock_server.exe", "Bedrock executable path. Defaults to current directory")
 
-func init() {
+func initStartHandler(prov Provider) {
 	Register("start", &startHandler{
 		bedrockPath: getBedrockServerPath(),
 	})
@@ -27,14 +28,19 @@ var bedrockPath string
 
 func getBedrockServerPath() string {
 	if bedrockPath == "" {
-		var err error
 		exePath := *bedrockServerExecutable
 		if !filepath.IsAbs(exePath) {
-			exePath, err = exec.LookPath(*bedrockServerExecutable)
-			if err != nil {
-				panic(fmt.Sprintf("bedrock server not found. %v", err))
+			st, err := os.Stat(filepath.Join(".", *bedrockServerExecutable))
+			if err == nil && !st.IsDir() {
+				wd, _ := os.Getwd()
+				bedrockPath = wd
+			} else {
+				exePath, err = exec.LookPath(*bedrockServerExecutable)
+				if err != nil {
+					panic(fmt.Sprintf("bedrock server not found. %v", err))
+				}
+				bedrockPath = exePath
 			}
-			bedrockPath = exePath
 		}
 		glog.Infof("bedrockPath = %s", bedrockPath)
 	}
@@ -48,5 +54,30 @@ func (h *startHandler) Handle(ctx context.Context, provider Provider, command []
 	cmd.Dir = cwd
 	provider.SetServerProcess(cmd)
 
-	return provider.GetServerProcess().Start(ctx, provider)
+	ch := make(chan string)
+	provider.GetServerProcess().StartReadOutput(ch)
+	defer provider.GetServerProcess().EndReadOutput()
+
+	err := provider.GetServerProcess().Start(ctx, provider)
+	if err != nil {
+		return err
+	}
+
+	count := 0
+	for {
+		select {
+		case l, ok := <-ch:
+			if !ok {
+				return fmt.Errorf("failed to start the server")
+			}
+			// Second port message indicates server fully started.
+			if strings.Contains(l, "[INFO] IPv6 supported, port:") {
+				count += 1
+				if count == 2 {
+					glog.Infof("server started successfully")
+					return nil
+				}
+			}
+		}
+	}
 }

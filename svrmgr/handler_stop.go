@@ -7,7 +7,7 @@ import (
 
 type stopHandler struct{}
 
-func init() {
+func initStopHandler(prov Provider) {
 	Register("stop", &stopHandler{})
 }
 

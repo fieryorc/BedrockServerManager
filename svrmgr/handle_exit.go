@@ -7,7 +7,7 @@ import (
 
 type exitHandler struct{}
 
-func init() {
+func initExitHandler(provider Provider) {
 	Register("exit", &exitHandler{})
 }
 
