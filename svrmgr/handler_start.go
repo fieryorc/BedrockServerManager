@@ -36,7 +36,7 @@ func getBedrockServerPath() string {
 			st, err := os.Stat(filepath.Join(".", *bedrockServerExecutable))
 			if err == nil && !st.IsDir() {
 				wd, _ := os.Getwd()
-				bedrockPath = wd
+				bedrockPath = filepath.Join(wd, *bedrockServerExecutable)
 			} else {
 				exePath, err = exec.LookPath(*bedrockServerExecutable)
 				if err != nil {
