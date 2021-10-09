@@ -50,5 +50,5 @@ func (sm *ServerManager) GetServerProcess() *Process {
 }
 
 func (sm *ServerManager) ResetServerProcess() {
-	sm.serverProcess = nil
+	sm.serverProcess.cmd = nil
 }
