@@ -29,9 +29,9 @@ Syntax:
 		Start the bedrock server
 	stop
 		Stop the bedrock server
-	exit
+	quit
 		Exit the server manager shell. If server is running, will be stopped.
-		alias: e
+		alias: q, exit
 	backup save [Optional backup message]
 		Take a backup. Specify optional message. 
 		alias: bf

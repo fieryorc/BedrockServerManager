@@ -12,15 +12,17 @@ import (
 
 // aliases list
 var aliases = map[string]string{
-	"bs": "backup save",
-	"br": "backup restore",
-	"bl": "backup list",
-	"bp": "backup period",
-	"h":  "help",
-	"e":  "exit",
-	"s":  "status",
-	"$":  "shell",
-	"@":  "server",
+	"bs":   "backup save",
+	"br":   "backup restore",
+	"bl":   "backup list",
+	"bp":   "backup period",
+	"h":    "help",
+	"e":    "exit",
+	"q":    "exit",
+	"quit": "exit",
+	"s":    "status",
+	"$":    "shell",
+	"@":    "server",
 }
 
 // Handler for the plugins

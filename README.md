@@ -99,6 +99,20 @@ Q: How to turn loggin on?
 A: Verbose logs are written to %temp% directory. Look for recently modified files with name starting
 with `BedrockServerManager.exe.XXX` or run `dir /OD %temp%\BedrockServerManager.exe.*` to get the log log file list. Alternatively, you can also pass --logtostderr flag to print more verbose logging to the console though it can be very distracting.
 
+Q: What parts are included in the backup
+A: Only `worlds` folder is included in the backup. The git repository can contain other files, but
+when server manager takes the backup, it only includes `worlds` folder.
+
+Q: Can I use git directly to restore?
+A: Yes, you can. Server manager is simply a convenient utility on top of git. You can use git directly
+to list, restore and do other things.
+
+Q: How do I see what commands server manager runs?
+A: Check the details logs under `%temp%` directory. All commands are printed there.
+
+Q: I want a new feature. What do I do?
+A: Open an issue to track. I can't guarantee but I'll try. You can also send me a PR. 
+
 ## Issues
 Hope you find this useful and like it. If you find any issues, please report or send PR.
 
