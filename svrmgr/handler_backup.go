@@ -182,7 +182,7 @@ func (h *backupHandler) List(ctx context.Context, provider Provider, args []stri
 	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
 	cmdArgs := []string{
 		"log",
-		`--format=%h %s (%ad) [%d]`,
+		`--format=%h %s (%ad) %d`,
 		"--decorate",
 		"--date=relative",
 		fmt.Sprintf("-%d", maxItems),
@@ -237,6 +237,10 @@ func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []str
 	if err != nil {
 		return fmt.Errorf("failed to clean. %v", err)
 	}
+	_, err = h.runCommand(ctxTimeout, h.gitPath, "reset", "--hard")
+	if err != nil {
+		return fmt.Errorf("failed to reset. %v", err)
+	}
 	provider.Log("clean successful")
 	return nil
 }
@@ -244,7 +248,6 @@ func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []str
 // backupWithGit implements the backup logic.
 func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, fileList string, description string) error {
 	var err error
-	provider.Log(fmt.Sprintf("running git to backup. %s", fileList))
 
 	isClean, err := h.isDirClean(ctx)
 	if err != nil {

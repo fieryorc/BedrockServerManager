@@ -3,6 +3,7 @@ package svrmgr
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/golang/glog"
 )
+
+var maxLineLength = flag.Int("server_output_line_limit", 100, "max line length for server output. longer lines will be truncated to this size")
 
 // LogLine represents a single line of the log
 type LogLine struct {
@@ -130,5 +133,9 @@ func (proc *Process) handleStdOut(provider Provider, stdOut io.ReadCloser, captu
 
 // processOutputLine writes line to the console.
 func (proc *Process) processOutputLine(provider Provider, line string) {
+	glog.Infof(line)
+	if len(line) > *maxLineLength {
+		line = line[:*maxLineLength] + " ..."
+	}
 	provider.Log(line)
 }
