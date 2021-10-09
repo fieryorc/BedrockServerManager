@@ -187,7 +187,6 @@ func (h *backupHandler) List(ctx context.Context, provider Provider, args []stri
 		"--date=relative",
 		fmt.Sprintf("-%d", maxItems),
 	}
-	cmdArgs = append(cmdArgs, args...)
 	out, err := h.runCommand(ctxTimeout, h.gitPath, cmdArgs...)
 	provider.Printfln("%s", out)
 	if err != nil {

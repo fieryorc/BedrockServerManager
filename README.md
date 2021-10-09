@@ -14,6 +14,8 @@ This program is released under MIT licence.
  * Backup restore (requires server to be stopped)
  * Automatic periodic live backups
 
+![](https://github.com/fieryorc/BedrockServerManagerWebsite/blob/master/media/bedsvrmgr-demo.gif)
+
 ## Why?
 I run a small Bedrock server for myself and few friends. I run it on windows.
 I was looking for a server manager for windows where it will take periodic live backups.
