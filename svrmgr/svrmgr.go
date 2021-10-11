@@ -3,8 +3,10 @@ package svrmgr
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/golang/glog"
@@ -12,18 +14,23 @@ import (
 
 // aliases list
 var aliases = map[string]string{
-	"bs":   "backup save",
-	"br":   "backup restore",
-	"bl":   "backup list",
-	"bp":   "backup period",
-	"h":    "help",
-	"e":    "exit",
-	"q":    "exit",
-	"quit": "exit",
-	"s":    "status",
-	"$":    "shell",
-	"@":    "server",
+	"bs":        "backup save",
+	"br":        "backup restore",
+	"bl":        "backup list",
+	"bp":        "backup period",
+	"bd":        "backup delete",
+	"workspace": "backup",
+	"h":         "help",
+	"e":         "exit",
+	"q":         "exit",
+	"quit":      "exit",
+	"s":         "status",
+	"$":         "shell",
+	"wc":        "backup clean",
+	"@":         "server",
 }
+
+var gitWorkspaceDir = flag.String("git_workspace", "", "git root directory for the world. If not specified, uses bedrock server directory")
 
 // Handler for the plugins
 type Handler interface {
@@ -44,6 +51,7 @@ type ServerManager struct {
 	// Maintains the bedrock server info.
 	// Initialized and never nil.
 	serverProcess *Process
+	gw            *gitWrapper
 }
 
 // NewServerManager creates a new server manager
@@ -52,6 +60,13 @@ func NewServerManager() *ServerManager {
 	sm := &ServerManager{}
 	sm.serverProcess = NewProcess(sm, nil)
 	sm.loadPlugings()
+
+	wsDir := *gitWorkspaceDir
+	if wsDir == "" {
+		wsDir = filepath.Dir(getBedrockServerPath())
+	}
+	sm.gw = newGitWrapper(wsDir)
+
 	return sm
 }
 

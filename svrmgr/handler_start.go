@@ -52,6 +52,11 @@ func getBedrockServerPath() string {
 
 // Handle - starts the server and waits for specific marker messages.
 func (h *startHandler) Handle(ctx context.Context, provider Provider, command []string) error {
+
+	if provider.GetServerProcess().IsRunning() {
+		return fmt.Errorf("server already running")
+	}
+
 	cwd, _ := os.Getwd()
 	cmd := exec.CommandContext(ctx, h.bedrockPath)
 	cmd.Dir = cwd

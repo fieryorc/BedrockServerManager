@@ -18,6 +18,7 @@ type Provider interface {
 	SetServerProcess(sp *exec.Cmd)
 	GetServerProcess() *Process
 	ResetServerProcess()
+	GitWrapper() GitWrapper
 }
 
 func (sm *ServerManager) Println(str string) {
@@ -51,4 +52,8 @@ func (sm *ServerManager) GetServerProcess() *Process {
 
 func (sm *ServerManager) ResetServerProcess() {
 	sm.serverProcess.cmd = nil
+}
+
+func (sm *ServerManager) GitWrapper() GitWrapper {
+	return sm.gw
 }

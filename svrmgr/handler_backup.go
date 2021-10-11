@@ -4,9 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,44 +11,36 @@ import (
 	"github.com/golang/glog"
 )
 
-var gitExecutable = flag.String("git_exe", "git.exe", "path to the git executable (if git.exe is not in the PATH)")
 var saveTimeout = flag.Duration("save_timeout", time.Second*30, "Time to wait for save command to complete")
-var gitRoot = flag.String("git_root", "", "git root directory for the world. If not specified, uses bedrock server directory")
 var autoBackupInterval = flag.Duration("backup_interval", time.Minute*30, "automatic backup interval.")
+
+type backupType string
+
+const (
+	// backupTypeManual - manual backups
+	backupTypeManual backupType = "manual"
+	// backupTypePeriodic - Periodic backups
+	backupTypePeriodic backupType = "periodic"
+	// backupTypeTemp - temporary saves as a result of running clean.
+	backupTypeTemp backupType = "temp"
+)
 
 // backupHandler handles the backup logic.
 // Supports multiple sub commands.
 type backupHandler struct {
-	gitPath string
-	gitRoot string
-	lock    sync.Mutex  // All operations are atomic.
-	timer   *time.Timer // Periodic backup timer
+	lock  sync.Mutex  // All operations are atomic.
+	timer *time.Timer // Periodic backup timer
 }
 
 // initBackupHandler initializes the backup plugin and starts the
 // periodic backup.
 func initBackupHandler(prov Provider) {
-	var err error
-	exePath := *gitExecutable
-	if !filepath.IsAbs(exePath) {
-		exePath, err = exec.LookPath(*gitExecutable)
-		if err != nil {
-			panic("git executable not found")
-		}
-	}
 
-	bedrockPath := getBedrockServerPath()
-	glog.Infof("bedrock server path = %s, dir = %s", bedrockPath, filepath.Dir(bedrockPath))
 	bh := &backupHandler{
-		gitPath: exePath,
-		gitRoot: filepath.Dir(bedrockPath),
-		timer:   time.NewTimer(*autoBackupInterval),
+		timer: time.NewTimer(time.Hour), // Will be reset immediately.
 	}
-	if *gitRoot != "" {
-		bh.gitRoot = *gitRoot
-	}
+	bh.setPeriod(context.Background(), prov, *autoBackupInterval)
 
-	glog.Infof("Registering backup handler: %+v", *bh)
 	Register("backup", bh)
 	go bh.runBackupLoop(context.Background(), prov)
 }
@@ -65,7 +54,7 @@ func (h *backupHandler) Handle(ctx context.Context, provider Provider, cmd []str
 	case "save":
 		msg := strings.Join(cmd[2:], " ")
 		if msg == "" {
-			msg = "Manual save"
+			return fmt.Errorf("backup description must be specified")
 		}
 		return h.Save(ctx, provider, msg)
 	case "list":
@@ -76,6 +65,10 @@ func (h *backupHandler) Handle(ctx context.Context, provider Provider, cmd []str
 		return h.Restore(ctx, provider, cmd[2:])
 	case "clean":
 		return h.Clean(ctx, provider, cmd[2:])
+	case "delete":
+		return h.Delete(ctx, provider, cmd[2:])
+	case "status":
+		return h.Status(ctx, provider)
 	default:
 		return fmt.Errorf("unknown command. try help")
 	}
@@ -85,14 +78,159 @@ func (h *backupHandler) Handle(ctx context.Context, provider Provider, cmd []str
 // If the server is running, then issue `save hold` and then run backup.
 // Once the backup is complete, issue `save resume`.
 func (h *backupHandler) Save(ctx context.Context, provider Provider, msg string) error {
-	var err error
-	ch := make(chan string, 10)
 
 	h.lock.Lock()
 	defer h.lock.Unlock()
+	return h.save(ctx, provider, backupTypeManual, msg)
+}
+
+// Restore from backup.
+// To restore, working directory must be clean and server must NOT be running.
+func (h *backupHandler) Restore(ctx context.Context, provider Provider, args []string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	if len(args) != 1 {
+		return fmt.Errorf("invalid args. Must specify HASH to restore. try help for syntax")
+	}
+	gitHash := args[0]
+
+	if provider.GetServerProcess().IsRunning() {
+		return fmt.Errorf("stop the server before restoring the backup")
+	}
+
+	isClean, err := provider.GitWrapper().IsDirClean(ctx)
+	if err != nil {
+		return err
+	}
+	if !isClean {
+		return fmt.Errorf("there are changes since last backup. run 'backup save' or 'backup clean' to clean up")
+	}
+
+	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	_, err = provider.GitWrapper().RunCommand(ctxTimeout, "checkout", gitHash)
+	if err != nil {
+		return err
+	}
+
+	provider.Log(fmt.Sprintf("successfully restored to %s", gitHash))
+	return nil
+}
+
+// List recent backups.
+// Optionally accepts the max item count.
+func (h *backupHandler) List(ctx context.Context, provider Provider, args []string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	var err error
+
+	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	cmdArgs := []string{
+		"branch",
+		"-av",
+		"--format=%(if)%(HEAD)%(then)* %(else)  %(end)%(refname:lstrip=2) %(contents:subject) (%(committerdate:relative))",
+		"--list",
+	}
+
+	// If filter is specified, use it.
+	if len(args) > 0 {
+		cmdArgs = append(cmdArgs, args...)
+	} else {
+		cmdArgs = append(cmdArgs, "saves/*")
+	}
+
+	out, err := provider.GitWrapper().RunCommand(ctxTimeout, cmdArgs...)
+	provider.Printfln("%s", out)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// SetPeriod sets backup interval for periodic backup.
+func (h *backupHandler) SetPeriod(ctx context.Context, provider Provider, args []string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	if len(args) != 1 {
+		return fmt.Errorf("invalid args. must specify INTERVAL. try 'help' for usage")
+	}
+	duration := args[0]
+	interval, err := time.ParseDuration(duration)
+	if err != nil {
+		return fmt.Errorf("failed to set backup interval. %v", err)
+	}
+
+	return h.setPeriod(ctx, provider, interval)
+}
+
+// SetPeriod sets backup interval for periodic backup.
+func (h *backupHandler) setPeriod(ctx context.Context, provider Provider, interval time.Duration) error {
+	if interval > 0 && interval < time.Second {
+		return fmt.Errorf("backup period cannot be shorter than a second")
+	}
+
+	*autoBackupInterval = interval
+	if !h.timer.Stop() {
+		<-h.timer.C
+	}
+	if interval > 0 {
+		provider.Log(fmt.Sprintf("backup interval set to %v", interval))
+		h.timer.Reset(interval)
+	} else {
+		provider.Log("periodic backup suspended")
+	}
+	return nil
+}
+
+// Clean the working directory by discarding the files.
+func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	if provider.GetServerProcess().IsRunning() {
+		return fmt.Errorf("cannot clean. server is running")
+	}
+
+	h.save(ctx, provider, backupTypeTemp, "Saving for cleaning")
+	provider.Log("clean successful")
+	return nil
+}
+
+// Status returns the current state.
+func (h *backupHandler) Status(ctx context.Context, provider Provider) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	isClean, err := provider.GitWrapper().IsDirClean(ctx)
+	if err != nil {
+		return err
+	}
+	if isClean {
+		provider.Log("clean. no changes since last backup/restore")
+	} else {
+		provider.Log("there are changes since last backup/restore")
+	}
+
+	return nil
+}
+
+// Delete the specified backup
+// Wildcards are not supported
+func (h *backupHandler) Delete(ctx context.Context, provider Provider, args []string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	return provider.GitWrapper().DeleteBranches(ctx, provider, args)
+}
+
+func (h *backupHandler) save(ctx context.Context, provider Provider, bt backupType, msg string) error {
+	var err error
+	ch := make(chan string, 10)
 
 	if !provider.GetServerProcess().IsRunning() {
-		return h.backupWithGit(ctx, provider, "", msg)
+		return h.backupWithGit(ctx, provider, bt, msg)
 	}
 
 	provider.GetServerProcess().StartReadOutput(ch)
@@ -113,8 +251,8 @@ func (h *backupHandler) Save(ctx context.Context, provider Provider, msg string)
 			glog.Infof("got from channel: %v", l)
 			if strings.Contains(l, "Data saved. Files are now ready to be copied") {
 				// Read the next line. This is the list of files
-				l = <-ch
-				if err = h.backupWithGit(ctx, provider, l, msg); err != nil {
+				<-ch
+				if err = h.backupWithGit(ctx, provider, bt, msg); err != nil {
 					return err
 				}
 				return nil
@@ -131,125 +269,11 @@ func (h *backupHandler) Save(ctx context.Context, provider Provider, msg string)
 	}
 }
 
-// Restore from backup.
-// To restore, working directory must be clean and server must NOT be running.
-func (h *backupHandler) Restore(ctx context.Context, provider Provider, args []string) error {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	if len(args) != 1 {
-		return fmt.Errorf("invalid args. Must specify HASH to restore. try help for syntax")
-	}
-	gitHash := args[0]
-
-	if provider.GetServerProcess().IsRunning() {
-		return fmt.Errorf("stop the server before restoring the backup")
-	}
-
-	isClean, err := h.isDirClean(ctx)
-	if err != nil {
-		return err
-	}
-	if !isClean {
-		return fmt.Errorf("there are dirty files in the directory. run 'backup save' or 'backup clean' to clean up")
-	}
-
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	_, err = h.runCommand(ctxTimeout, h.gitPath, "reset", "--hard", gitHash)
-	if err != nil {
-		return err
-	}
-
-	provider.Log(fmt.Sprintf("successfully restored to %s", gitHash))
-	return nil
-}
-
-// List recent backups.
-// Optionally accepts the max item count.
-func (h *backupHandler) List(ctx context.Context, provider Provider, args []string) error {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	var err error
-	maxItems := 15
-
-	if len(args) > 0 {
-		maxItems, err = strconv.Atoi(args[0])
-		if err != nil {
-			return fmt.Errorf("invalid max items. %v. try 'help' for usage", maxItems)
-		}
-	}
-
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	cmdArgs := []string{
-		"log",
-		`--format=%h %s (%ad) %d`,
-		"--decorate",
-		"--date=relative",
-		"--reflog",
-		fmt.Sprintf("-%d", maxItems),
-	}
-	out, err := h.runCommand(ctxTimeout, h.gitPath, cmdArgs...)
-	provider.Printfln("%s", out)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// SetPeriod sets backup interval for periodic backup.
-func (h *backupHandler) SetPeriod(ctx context.Context, provider Provider, args []string) error {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	if len(args) != 1 {
-		return fmt.Errorf("invalid args. must specify INTERVAL. try 'help' for usage")
-	}
-
-	duration := args[0]
-	interval, err := time.ParseDuration(duration)
-	if err != nil {
-		return fmt.Errorf("failed to set backup interval. %v", err)
-	}
-	if interval > 0 && interval < time.Second {
-		return fmt.Errorf("backup period cannot be shorter than a second")
-	}
-	provider.Log(fmt.Sprintf("backup interval set to %v", interval))
-	*autoBackupInterval = interval
-	if !h.timer.Stop() {
-		<-h.timer.C
-	}
-	h.timer.Reset(interval)
-	return nil
-}
-
-// Clean the working directory by discarding the files.
-func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []string) error {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	if provider.GetServerProcess().IsRunning() {
-		return fmt.Errorf("cannot clean. server is running")
-	}
-
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	_, err := h.runCommand(ctxTimeout, h.gitPath, "clean", "-df", "worlds")
-	if err != nil {
-		return fmt.Errorf("failed to clean. %v", err)
-	}
-	_, err = h.runCommand(ctxTimeout, h.gitPath, "reset", "--hard")
-	if err != nil {
-		return fmt.Errorf("failed to reset. %v", err)
-	}
-	provider.Log("clean successful")
-	return nil
-}
-
 // backupWithGit implements the backup logic.
-func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, fileList string, description string) error {
+func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, bt backupType, description string) error {
 	var err error
 
-	isClean, err := h.isDirClean(ctx)
+	isClean, err := provider.GitWrapper().IsDirClean(ctx)
 	if err != nil {
 		return err
 	}
@@ -259,19 +283,26 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, fi
 	}
 
 	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	out, err := h.runCommand(ctxTimeout, h.gitPath, "add", "worlds")
+	out, err := provider.GitWrapper().RunCommand(ctxTimeout, "add", ".")
 	if err != nil {
 		provider.Log(out)
 		return err
 	}
 
 	ctxTimeout, _ = context.WithTimeout(ctx, *saveTimeout)
-
 	if description == "" {
 		panic("backup description not set")
 	}
 
-	out, err = h.runCommand(ctxTimeout, h.gitPath, "commit", "--allow-empty", "-m", description)
+	branch := fmt.Sprintf("saves/%s/%s", bt, time.Now().Local().Format("20060102-150405"))
+	out, err = provider.GitWrapper().RunCommand(ctxTimeout, "checkout", "--orphan", branch)
+	if err != nil {
+		provider.Log(out)
+		provider.Log(fmt.Sprintf("backup failed. %v", err))
+		return err
+	}
+
+	out, err = provider.GitWrapper().RunCommand(ctxTimeout, "commit", "--allow-empty", "-m", description)
 	if err != nil {
 		provider.Log(out)
 		provider.Log(fmt.Sprintf("backup failed. %v", err))
@@ -282,35 +313,18 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, fi
 
 }
 
-// runCommand runs git command and returs the results.
-// Output is not printed to the console.
-func (h *backupHandler) runCommand(ctx context.Context, path string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Dir = h.gitRoot
+func (h *backupHandler) periodicBackup(ctx context.Context, provider Provider) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
 
-	glog.Infof("running %s %s", cmd.Path, strings.Join(cmd.Args, " "))
-	out, err := cmd.CombinedOutput()
-
-	if err != nil {
-		glog.Infof("command failed. %v", err)
-		glog.Infof(string(out))
-		return string(out), fmt.Errorf("failed to run %s %s. %v", path, strings.Join(args, " "), err)
-	}
-
-	if cmd.ProcessState.ExitCode() != 0 {
-		glog.Infof("command failed with exit code %v", cmd.ProcessState.ExitCode())
-		glog.Infof(string(out))
-		return string(out), fmt.Errorf("git command failed with exit code %v", cmd.ProcessState.ExitCode())
-	}
-
-	return string(out), nil
+	return h.save(ctx, provider, backupTypePeriodic, "Automatic periodic backup")
 }
 
 // runBackupLoop runs the main backup loop.
 func (h *backupHandler) runBackupLoop(ctx context.Context, prov Provider) {
 	for {
 		_, more := <-h.timer.C
-		h.Save(context.Background(), prov, "Automatic periodic backup")
+		h.periodicBackup(context.Background(), prov)
 		if !more {
 			// Channel closed.
 			glog.Infof("periodic backup ending")
@@ -319,16 +333,4 @@ func (h *backupHandler) runBackupLoop(ctx context.Context, prov Provider) {
 		// Restart timer
 		h.timer.Reset(*autoBackupInterval)
 	}
-}
-
-// isDirClean returns true if the git directory is clean.
-func (h *backupHandler) isDirClean(ctx context.Context) (bool, error) {
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	out, err := h.runCommand(ctxTimeout, h.gitPath, "status")
-	glog.Info("git status:")
-	glog.Infof(out)
-	if err != nil {
-		return false, err
-	}
-	return strings.Contains(out, "nothing to commit, working tree clean"), nil
 }

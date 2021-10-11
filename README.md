@@ -100,8 +100,7 @@ A: Verbose logs are written to %temp% directory. Look for recently modified file
 with `BedrockServerManager.exe.XXX` or run `dir /OD %temp%\BedrockServerManager.exe.*` to get the log log file list. Alternatively, you can also pass --logtostderr flag to print more verbose logging to the console though it can be very distracting.
 
 Q: What parts are included in the backup
-A: Only `worlds` folder is included in the backup. The git repository can contain other files, but
-when server manager takes the backup, it only includes `worlds` folder.
+A: Everything inside the git repo is included in the backup. The git repository can contain other files as well.
 
 Q: Can I use git directly to restore?
 A: Yes, you can. Server manager is simply a convenient utility on top of git. You can use git directly
@@ -112,6 +111,19 @@ A: Check the details logs under `%temp%` directory. All commands are printed the
 
 Q: I want a new feature. What do I do?
 A: Open an issue to track. I can't guarantee but I'll try. You can also send me a PR. 
+
+Q: Why is the git commit objects have no history?
+A: This is intentional to allow cleanup of older backups. All backups are stored as git
+   references (branches). Keeping history chained will make it very difficult to get rid of old backups.
+   
+Q: My backups are taking lots of space. How do free up some space? 
+A: You can delete the backups and run `$ git gc --prune=now` to clean up unused commits which will free up space.
+
+Q: Can you clean up periodic backups automatically?
+A: Not yet, but it will be implemented sometime in the future. Note: you can specify wildcards in the `backup list` and `backup delete` operations to bulk delete the backups.
+
+Q: Do backup delete permanently deletes the backup?
+A: It will remove the git branch, but the underlying data will live until git garbage collection runs (which usually runs every 2 weeks). So if you want to recover deleted backup, you can run `git log --reflog` to search for the ones.
 
 ## Issues
 Hope you find this useful and like it. If you find any issues, please report or send PR.
