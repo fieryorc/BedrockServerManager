@@ -19,10 +19,17 @@ type gitWrapper struct {
 	wsDir string
 }
 
+type GitReference struct {
+	Ref  string
+	Type string
+}
+
 type GitWrapper interface {
 	RunCommand(ctx context.Context, args ...string) (string, error)
 	IsDirClean(ctx context.Context) (bool, error)
 	DeleteBranches(ctx context.Context, provider Provider, args []string) error
+	GetCurrentHead(context.Context) (GitReference, error)
+	Checkout(context.Context, GitReference) error
 }
 
 // newGitWrapper returns new instance of git wrapper.
@@ -139,5 +146,33 @@ func (gw *gitWrapper) DeleteBranches(ctx context.Context, provider Provider, arg
 		return err
 	}
 
+	return nil
+}
+
+func (gw *gitWrapper) GetCurrentHead(ctx context.Context) (GitReference, error) {
+	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	cmdArgs := []string{
+		"rev-parse",
+		"HEAD",
+	}
+
+	out, err := gw.RunCommand(ctxTimeout, cmdArgs...)
+	if err != nil {
+		return GitReference{}, err
+	}
+
+	return GitReference{Ref: strings.Trim(out, "\r\n ")}, nil
+}
+func (gw *gitWrapper) Checkout(ctx context.Context, gr GitReference) error {
+	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	cmdArgs := []string{
+		"checkout",
+		gr.Ref,
+	}
+
+	_, err := gw.RunCommand(ctxTimeout, cmdArgs...)
+	if err != nil {
+		return err
+	}
 	return nil
 }

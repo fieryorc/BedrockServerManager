@@ -193,7 +193,19 @@ func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []str
 		return fmt.Errorf("cannot clean. server is running")
 	}
 
-	h.save(ctx, provider, backupTypeTemp, "Saving for cleaning")
+	curCommit, err := provider.GitWrapper().GetCurrentHead(ctx)
+	if err != nil {
+		return fmt.Errorf("internal failure. %v", err)
+	}
+
+	if err = h.save(ctx, provider, backupTypeTemp, "Saving for cleaning"); err != nil {
+		return fmt.Errorf("failed to backup current contents. %v", err)
+	}
+
+	if err = provider.GitWrapper().Checkout(ctx, curCommit); err != nil {
+		return fmt.Errorf("failed to restore old contents. %v", err)
+	}
+
 	provider.Log("clean successful")
 	return nil
 }
