@@ -54,10 +54,21 @@ Syntax:
 		Delete the specified backup. You can specify wildcard as well.
 		Example: backup delete saves/manual/202102* will delete all backups starting saves/manual/202102*.
 		alias: bd
+	backup prune CUTOFF_TIME INTERVAL
+		Cleanup periodic backups older than CUTOFF_TIME. Keep the backups for every INTERVAL.
+		For example, 'backup prune 3d 8h' will cleanup backups older than 3days. It will leave
+		one backup every 8hours. The backup that is retained is chosen such that each backup is spaced at 8h.
+		Example: 
+			backup prune 3d 1d - Prune all backups older than 3days keeping one backup per day.
+			In other words, turn into daily backup for backups older than 3d. Backups within last 3days will
+			not be touched.
+		Warning: Once deleted, backups cannot be restored through BedrockServerManager. You can
+			salvage git commits through git.
 	workspace clean
 		Restore the current state to currently active backup. This deletes the modified files (since last backup).
 		Current contents are backed as 'saved/temp/DATE_TIME'.
 		alias: wc
+		
 	
 	backup clean
 `)

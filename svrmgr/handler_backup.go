@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -11,7 +13,6 @@ import (
 	"github.com/golang/glog"
 )
 
-var saveTimeout = flag.Duration("save_timeout", time.Second*30, "Time to wait for save command to complete")
 var autoBackupInterval = flag.Duration("backup_interval", time.Minute*30, "automatic backup interval.")
 
 type backupType string
@@ -28,8 +29,9 @@ const (
 // backupHandler handles the backup logic.
 // Supports multiple sub commands.
 type backupHandler struct {
-	lock  sync.Mutex  // All operations are atomic.
-	timer *time.Timer // Periodic backup timer
+	lock           sync.Mutex    // All operations are atomic.
+	timer          *time.Timer   // Periodic backup timer
+	backupInterval time.Duration // Automatic backup interval.
 }
 
 // initBackupHandler initializes the backup plugin and starts the
@@ -69,6 +71,8 @@ func (h *backupHandler) Handle(ctx context.Context, provider Provider, cmd []str
 		return h.Delete(ctx, provider, cmd[2:])
 	case "status":
 		return h.Status(ctx, provider)
+	case "prune":
+		return h.Prune(ctx, provider, cmd[2:])
 	default:
 		return fmt.Errorf("unknown command. try help")
 	}
@@ -107,7 +111,7 @@ func (h *backupHandler) Restore(ctx context.Context, provider Provider, args []s
 		return fmt.Errorf("there are changes since last backup. run 'backup save' or 'backup clean' to clean up")
 	}
 
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	ctxTimeout, _ := context.WithTimeout(ctx, *commandTimeout)
 	_, err = provider.GitWrapper().RunCommand(ctxTimeout, "checkout", gitHash)
 	if err != nil {
 		return err
@@ -124,23 +128,16 @@ func (h *backupHandler) List(ctx context.Context, provider Provider, args []stri
 	defer h.lock.Unlock()
 	var err error
 
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	cmdArgs := []string{
-		"branch",
-		"-av",
-		"--format=%(if)%(HEAD)%(then)* %(else)  %(end)%(refname:lstrip=2) %(contents:subject) (%(committerdate:relative))",
-		"--list",
+	branches, err := provider.GitWrapper().ListBranches(ctx, provider, args)
+	if err != nil {
+		return err
 	}
 
-	// If filter is specified, use it.
-	if len(args) > 0 {
-		cmdArgs = append(cmdArgs, args...)
-	} else {
-		cmdArgs = append(cmdArgs, "saves/*")
+	var branchList []string
+	for _, b := range branches {
+		branchList = append(branchList, b.String())
 	}
-
-	out, err := provider.GitWrapper().RunCommand(ctxTimeout, cmdArgs...)
-	provider.Printfln("%s", out)
+	provider.Printfln("%s", strings.Join(branchList, "\r\n"))
 	if err != nil {
 		return err
 	}
@@ -156,32 +153,13 @@ func (h *backupHandler) SetPeriod(ctx context.Context, provider Provider, args [
 	if len(args) != 1 {
 		return fmt.Errorf("invalid args. must specify INTERVAL. try 'help' for usage")
 	}
-	duration := args[0]
-	interval, err := time.ParseDuration(duration)
+
+	interval, err := parseDuration(args[0])
 	if err != nil {
 		return fmt.Errorf("failed to set backup interval. %v", err)
 	}
 
 	return h.setPeriod(ctx, provider, interval)
-}
-
-// SetPeriod sets backup interval for periodic backup.
-func (h *backupHandler) setPeriod(ctx context.Context, provider Provider, interval time.Duration) error {
-	if interval > 0 && interval < time.Second {
-		return fmt.Errorf("backup period cannot be shorter than a second")
-	}
-
-	*autoBackupInterval = interval
-	if !h.timer.Stop() {
-		<-h.timer.C
-	}
-	if interval > 0 {
-		provider.Log(fmt.Sprintf("backup interval set to %v", interval))
-		h.timer.Reset(interval)
-	} else {
-		provider.Log("periodic backup suspended")
-	}
-	return nil
 }
 
 // Clean the working directory by discarding the files.
@@ -225,6 +203,11 @@ func (h *backupHandler) Status(ctx context.Context, provider Provider) error {
 		provider.Log("there are changes since last backup/restore")
 	}
 
+	if h.backupInterval == 0 {
+		provider.Log("automatic backup disabled")
+	} else {
+		provider.Log(fmt.Sprintf("automatic backup interval: %v", h.backupInterval))
+	}
 	return nil
 }
 
@@ -234,7 +217,50 @@ func (h *backupHandler) Delete(ctx context.Context, provider Provider, args []st
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
-	return provider.GitWrapper().DeleteBranches(ctx, provider, args)
+	var err error
+	if len(args) == 0 {
+		return fmt.Errorf("must specify at least one branch to delete")
+	}
+
+	branches, err := provider.GitWrapper().ListBranches(ctx, provider, args)
+	if err != nil {
+		return err
+	}
+
+	return provider.GitWrapper().DeleteBranches(ctx, provider, branches)
+}
+
+// Prune the backups
+func (h *backupHandler) Prune(ctx context.Context, provider Provider, args []string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	if len(args) != 2 {
+		return fmt.Errorf("invalid arguments. try 'help'")
+	}
+	startTime, err := parseDuration(args[0])
+	if err != nil {
+		return fmt.Errorf("invalid start time. %v", err)
+	}
+
+	pruneInterval, err := parseDuration(args[1])
+	if err != nil {
+		return fmt.Errorf("invalid interval. %v", err)
+	}
+
+	branches, err := provider.GitWrapper().ListBranches(ctx, provider, []string{"saves/periodic/*"})
+	if err != nil {
+		return err
+	}
+	// Sort by ascending order
+	sort.Slice(branches, func(i, j int) bool {
+		return branches[i].CommitDate.Before(branches[j].CommitDate)
+	})
+	prunedBranches, err := h.getDeletionCanditates(ctx, provider, branches, startTime, pruneInterval)
+	if err != nil {
+		return err
+	}
+	return provider.GitWrapper().DeleteBranches(ctx, provider, prunedBranches)
 }
 
 func (h *backupHandler) save(ctx context.Context, provider Provider, bt backupType, msg string) error {
@@ -255,7 +281,7 @@ func (h *backupHandler) save(ctx context.Context, provider Provider, bt backupTy
 	time.Sleep(time.Millisecond * 250)
 
 	// Wait till server is ready for copy.
-	timeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	timeout, _ := context.WithTimeout(ctx, *commandTimeout)
 	for {
 		select {
 		// Read the data from channel until we get ready message.
@@ -294,14 +320,14 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, bt
 		return nil
 	}
 
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
+	ctxTimeout, _ := context.WithTimeout(ctx, *commandTimeout)
 	out, err := provider.GitWrapper().RunCommand(ctxTimeout, "add", ".")
 	if err != nil {
 		provider.Log(out)
 		return err
 	}
 
-	ctxTimeout, _ = context.WithTimeout(ctx, *saveTimeout)
+	ctxTimeout, _ = context.WithTimeout(ctx, *commandTimeout)
 	if description == "" {
 		panic("backup description not set")
 	}
@@ -325,6 +351,29 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, bt
 
 }
 
+// SetPeriod sets backup interval for periodic backup.
+func (h *backupHandler) setPeriod(ctx context.Context, provider Provider, interval time.Duration) error {
+	if interval < 0 {
+		return fmt.Errorf("backup period cannot be negative")
+	}
+
+	if interval > 0 && interval < time.Second {
+		return fmt.Errorf("backup period cannot be shorter than a second")
+	}
+
+	if !h.timer.Stop() {
+		<-h.timer.C
+	}
+	h.backupInterval = interval
+	if interval > 0 {
+		provider.Log(fmt.Sprintf("backup interval set to %v", interval))
+		h.timer.Reset(interval)
+	} else {
+		provider.Log("periodic backup suspended")
+	}
+	return nil
+}
+
 func (h *backupHandler) periodicBackup(ctx context.Context, provider Provider) error {
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -343,6 +392,52 @@ func (h *backupHandler) runBackupLoop(ctx context.Context, prov Provider) {
 			return
 		}
 		// Restart timer
-		h.timer.Reset(*autoBackupInterval)
+		h.timer.Reset(h.backupInterval)
 	}
+}
+
+func (h *backupHandler) getDeletionCanditates(
+	ctx context.Context,
+	provider Provider,
+	branches []GitReference,
+	cutoffTime time.Duration,
+	pruneInterval time.Duration) ([]GitReference, error) {
+
+	if len(branches) == 0 {
+		return branches, nil
+	}
+
+	var result []GitReference
+	cutOffDate := time.Now().Add(-cutoffTime)
+	lastSkippedBranch := branches[0]
+	for _, gr := range branches {
+		glog.Infof("processing: %v", gr)
+
+		// First skip all refs that are newer than startTime.
+		if gr.CommitDate.After(cutOffDate) {
+			lastSkippedBranch = gr
+			continue
+		}
+
+		if gr.CommitDate.Sub(lastSkippedBranch.CommitDate) > pruneInterval {
+			lastSkippedBranch = gr
+			continue
+		}
+
+		result = append(result, gr)
+	}
+
+	return result, nil
+}
+
+func parseDuration(str string) (time.Duration, error) {
+	if strings.HasSuffix(str, "d") {
+		v, err := strconv.Atoi(str[:len(str)-1])
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(v) * time.Hour * 24, nil
+	}
+
+	return time.ParseDuration(str)
 }

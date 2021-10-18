@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 // Provider implements the common functionality required by
@@ -22,19 +24,23 @@ type Provider interface {
 }
 
 func (sm *ServerManager) Println(str string) {
+	glog.Infof("OUT: %s", str)
 	fmt.Println(str)
 }
 
 func (sm *ServerManager) Printf(format string, args ...interface{}) {
+	glog.Infof("OUT: %s", fmt.Sprintf(format, args...))
 	fmt.Printf("%s", fmt.Sprintf(format, args...))
 }
 
 func (sm *ServerManager) Printfln(format string, args ...interface{}) {
+	glog.Infof("OUT: %s\r\n", fmt.Sprintf(format, args...))
 	fmt.Printf("%s\r\n", fmt.Sprintf(format, args...))
 }
 
 // Log output to the console. Usually always visible, and includes timestamp
 func (sm *ServerManager) Log(line string) {
+	glog.Infof("OUT: [%s] %s\r\n", time.Now().Local().Format("20060102-15:04:05"), line)
 	fmt.Printf("[%s] %s\r\n", time.Now().Local().Format("20060102-15:04:05"), line)
 }
 

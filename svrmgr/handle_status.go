@@ -29,5 +29,6 @@ func (h *statusHandler) Handle(ctx context.Context, provider Provider, cmd []str
 	}
 
 	provider.Log(fmt.Sprintf(`server is %s, workspace is %s`, serverState, wsState))
+	provider.RunCommand(ctx, "backup status")
 	return nil
 }

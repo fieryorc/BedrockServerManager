@@ -7,11 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/golang/glog"
 )
 
 var gitExecutable = flag.String("git_exe", "git.exe", "path to the git executable (if git.exe is not in the PATH)")
+var gitDryRun = flag.Bool("git_dry_run", false, "if specified, git update operations will not be performed")
+var commandTimeout = flag.Duration("git_command_timeout", time.Second*30, "Time to wait for git command to complete")
 
 // gitWrapper provides git functionality.
 type gitWrapper struct {
@@ -19,17 +22,42 @@ type gitWrapper struct {
 	wsDir string
 }
 
+// GitReferenceType represents the type of the git reference.
+type GitReferenceType string
+
+const (
+	GitReferenceTypeBranch GitReferenceType = "branch"
+	GitReferenceTypeTag    GitReferenceType = "tag"
+	GitReferenceTypeCommit GitReferenceType = "commit"
+)
+
+// GitReference type.
 type GitReference struct {
-	Ref  string
-	Type string
+	Ref                string
+	Type               GitReferenceType
+	IsHead             bool   // True if this is current head
+	Hash               string // Commit hash
+	Subject            string // Current commit subject line
+	CommitDate         time.Time
+	CommitDateRelative string
 }
 
+func (gr GitReference) String() string {
+	active := " "
+	if gr.IsHead {
+		active = "*"
+	}
+	return fmt.Sprintf("%s %s %s %s (%s)", active, gr.Ref, gr.Hash, gr.Subject, gr.CommitDateRelative)
+}
+
+// GitWrapper provides wrapper for git.
 type GitWrapper interface {
 	RunCommand(ctx context.Context, args ...string) (string, error)
 	IsDirClean(ctx context.Context) (bool, error)
-	DeleteBranches(ctx context.Context, provider Provider, args []string) error
+	DeleteBranches(ctx context.Context, provider Provider, refs []GitReference) error
 	GetCurrentHead(context.Context) (GitReference, error)
 	Checkout(context.Context, GitReference) error
+	ListBranches(ctx context.Context, provider Provider, filters []string) ([]GitReference, error)
 }
 
 // newGitWrapper returns new instance of git wrapper.
@@ -53,7 +81,8 @@ func newGitWrapper(wsDir string) *gitWrapper {
 // RunCommand runs git command and returs the results.
 // Output is not printed to the console.
 func (gw *gitWrapper) RunCommand(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, gw.exe, args...)
+	ctxTimeout, _ := context.WithTimeout(ctx, *commandTimeout)
+	cmd := exec.CommandContext(ctxTimeout, gw.exe, args...)
 	cmd.Dir = gw.wsDir
 
 	glog.Infof("running %s %s", cmd.Path, strings.Join(cmd.Args, " "))
@@ -76,8 +105,7 @@ func (gw *gitWrapper) RunCommand(ctx context.Context, args ...string) (string, e
 
 // IsDirClean returns true if the git directory is clean.
 func (gw *gitWrapper) IsDirClean(ctx context.Context) (bool, error) {
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	out, err := gw.RunCommand(ctxTimeout, "status")
+	out, err := gw.RunCommand(ctx, "status")
 	glog.Info("git status:")
 	glog.Infof(out)
 	if err != nil {
@@ -86,77 +114,13 @@ func (gw *gitWrapper) IsDirClean(ctx context.Context) (bool, error) {
 	return strings.Contains(out, "nothing to commit, working tree clean"), nil
 }
 
-func (gw *gitWrapper) DeleteBranches(ctx context.Context, provider Provider, args []string) error {
-	var err error
-	if len(args) == 0 {
-		return fmt.Errorf("must specify at least one branch to delete")
-	}
-
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
-	cmdArgs := []string{
-		"branch",
-		"-av",
-		"--format=%(refname:lstrip=2) %(contents:subject) %(if)%(HEAD)%(then)*%(end)",
-		"--list",
-	}
-	cmdArgs = append(cmdArgs, args...)
-
-	out, err := gw.RunCommand(ctxTimeout, cmdArgs...)
-	if err != nil {
-		return err
-	}
-
-	// Parse output to get the branch list
-	var branches []string
-	{
-		lines := strings.Split(out, "\n")
-		active := ""
-		for _, l := range lines {
-			if l == "" {
-				continue
-			}
-			comps := strings.Split(l, " ")
-			b := strings.Trim(comps[0], "\r\n\t ")
-			if strings.Contains(l, "*") {
-				active = b
-			} else {
-				branches = append(branches, b)
-			}
-		}
-
-		if active != "" {
-			if len(branches) == 0 {
-				return fmt.Errorf("active backup %s cannot be deleted", active)
-			} else {
-				provider.Log(fmt.Sprintf("active branch '%s' cannot be deleted", active))
-			}
-		}
-	}
-
-	provider.Log(fmt.Sprintf("deleting the following backups:\r\n%s", strings.Join(branches, "\r\n")))
-	ctxTimeout, _ = context.WithTimeout(ctx, *saveTimeout)
-	cmdArgs = []string{
-		"branch",
-		"-D",
-	}
-	cmdArgs = append(cmdArgs, branches...)
-	out, err = gw.RunCommand(ctxTimeout, cmdArgs...)
-	if err != nil {
-		provider.Log(fmt.Sprintf("git branch -D failed. %s", out))
-		return err
-	}
-
-	return nil
-}
-
 func (gw *gitWrapper) GetCurrentHead(ctx context.Context) (GitReference, error) {
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
 	cmdArgs := []string{
 		"rev-parse",
 		"HEAD",
 	}
 
-	out, err := gw.RunCommand(ctxTimeout, cmdArgs...)
+	out, err := gw.RunCommand(ctx, cmdArgs...)
 	if err != nil {
 		return GitReference{}, err
 	}
@@ -164,15 +128,102 @@ func (gw *gitWrapper) GetCurrentHead(ctx context.Context) (GitReference, error) 
 	return GitReference{Ref: strings.Trim(out, "\r\n ")}, nil
 }
 func (gw *gitWrapper) Checkout(ctx context.Context, gr GitReference) error {
-	ctxTimeout, _ := context.WithTimeout(ctx, *saveTimeout)
 	cmdArgs := []string{
 		"checkout",
 		gr.Ref,
 	}
 
-	_, err := gw.RunCommand(ctxTimeout, cmdArgs...)
+	_, err := gw.RunCommand(ctx, cmdArgs...)
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func (gw *gitWrapper) ListBranches(ctx context.Context, provider Provider, filters []string) ([]GitReference, error) {
+	var result []GitReference
+	var err error
+
+	cmdArgs := []string{
+		"branch",
+		"-av",
+		"--format=%(refname:lstrip=2)$XYX$%(objectname:short)$XYX$%(contents:subject)$XYX$%(committerdate)$XYX$%(committerdate:relative)$XYX$%(if)%(HEAD)%(then)*%(end)$XYX$",
+		"--list",
+	}
+	if len(filters) > 0 {
+		cmdArgs = append(cmdArgs, filters...)
+	}
+
+	out, err := gw.RunCommand(ctx, cmdArgs...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse output to get the branch list
+
+	lines := strings.Split(out, "\n")
+	for _, l := range lines {
+		if l == "" {
+			continue
+		}
+		comps := strings.Split(l, "$XYX$")
+		commitDate, err := time.Parse("Mon Jan 02 15:04:05 2006 -0700", comps[3])
+		if err != nil {
+			return nil, fmt.Errorf("invalid date from git.. internal error. %v", err)
+		}
+		result = append(result, GitReference{
+			Ref:                strings.Trim(comps[0], "\r\n\t "),
+			Hash:               strings.Trim(comps[1], "\r\n\t "),
+			Type:               GitReferenceTypeBranch,
+			Subject:            strings.Trim(comps[2], "\r\n\t "),
+			CommitDateRelative: strings.Trim(comps[4], "\r\n\t "),
+			IsHead:             comps[5] == "*",
+			CommitDate:         commitDate,
+		})
+	}
+
+	return result, nil
+}
+
+func (gw *gitWrapper) DeleteBranches(ctx context.Context, provider Provider, branches []GitReference) error {
+	var err error
+	if len(branches) == 0 {
+		return fmt.Errorf("must specify at least one branch to delete")
+	}
+
+	// Print warning if deleting active branch.
+	var logs []string
+	var branchList []string
+	for _, b := range branches {
+		if b.IsHead {
+			if len(branches) == 1 {
+				return fmt.Errorf("active backup %s cannot be deleted", b.Ref)
+			} else {
+				provider.Log(fmt.Sprintf("active branch '%s' cannot be deleted", b.Ref))
+			}
+		} else {
+			logs = append(logs, b.String())
+			branchList = append(branchList, b.Ref)
+		}
+	}
+
+	provider.Log(fmt.Sprintf("deleting the following backups:\r\n%s", strings.Join(logs, "\r\n")))
+	cmdArgs := []string{
+		"branch",
+		"-D",
+	}
+
+	if *gitDryRun {
+		provider.Log("*** dry run only. deletion not performed ****")
+		return nil
+	}
+
+	cmdArgs = append(cmdArgs, branchList...)
+	out, err := gw.RunCommand(ctx, cmdArgs...)
+	if err != nil {
+		provider.Log(fmt.Sprintf("git branch -D failed. %s", out))
+		return err
+	}
+
 	return nil
 }
