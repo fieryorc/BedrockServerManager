@@ -3,9 +3,11 @@ package svrmgr
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 
+	"github.com/fieryorc/BedrockServerManager/winutils"
 	"github.com/golang/glog"
 )
 
@@ -25,23 +27,23 @@ type Provider interface {
 
 func (sm *ServerManager) Println(str string) {
 	glog.Infof("OUT: %s", str)
-	fmt.Println(str)
+	io.WriteString(sm.stdout, fmt.Sprintln(str))
 }
 
 func (sm *ServerManager) Printf(format string, args ...interface{}) {
 	glog.Infof("OUT: %s", fmt.Sprintf(format, args...))
-	fmt.Printf("%s", fmt.Sprintf(format, args...))
+	io.WriteString(sm.stdout, fmt.Sprintf(format, args...))
 }
 
 func (sm *ServerManager) Printfln(format string, args ...interface{}) {
 	glog.Infof("OUT: %s\r\n", fmt.Sprintf(format, args...))
-	fmt.Printf("%s\r\n", fmt.Sprintf(format, args...))
+	io.WriteString(sm.stdout, winutils.AddNewLine(fmt.Sprintf(format, args...)))
 }
 
 // Log output to the console. Usually always visible, and includes timestamp
 func (sm *ServerManager) Log(line string) {
 	glog.Infof("OUT: [%s] %s\r\n", time.Now().Local().Format("20060102-15:04:05"), line)
-	fmt.Printf("[%s] %s\r\n", time.Now().Local().Format("20060102-15:04:05"), line)
+	io.WriteString(sm.stdout, winutils.AddNewLine(fmt.Sprintf("[%s] %s", time.Now().Local().Format("20060102-15:04:05"), line)))
 }
 
 func (sm *ServerManager) RunCommand(ctx context.Context, cmd string) error {

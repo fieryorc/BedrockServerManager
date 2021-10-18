@@ -37,7 +37,6 @@ type backupHandler struct {
 // initBackupHandler initializes the backup plugin and starts the
 // periodic backup.
 func initBackupHandler(prov Provider) {
-
 	bh := &backupHandler{
 		timer: time.NewTimer(time.Hour), // Will be reset immediately.
 	}
@@ -362,6 +361,7 @@ func (h *backupHandler) setPeriod(ctx context.Context, provider Provider, interv
 	}
 
 	if !h.timer.Stop() {
+		glog.Infof("waiting for timer to drain")
 		<-h.timer.C
 	}
 	h.backupInterval = interval

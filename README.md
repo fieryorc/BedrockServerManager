@@ -117,13 +117,15 @@ A: This is intentional to allow cleanup of older backups. All backups are stored
    references (branches). Keeping history chained will make it very difficult to get rid of old backups.
    
 Q: My backups are taking lots of space. How do free up some space? 
-A: You can delete the backups and run `$ git gc --prune=now` to clean up unused commits which will free up space.
+A: First delete the unnecessary backups using `backup delete` or `backup prune` commands. You can then run git garbage collection
+   by running `$ git gc --prune=now` to free up disk space.
 
 Q: Can you clean up periodic backups automatically?
-A: Not yet, but it will be implemented sometime in the future. Note: you can specify wildcards in the `backup list` and `backup delete` operations to bulk delete the backups.
+A: Yes, try `backup prune` command.
 
-Q: Do backup delete permanently deletes the backup?
-A: It will remove the git branch, but the underlying data will live until git garbage collection runs (which usually runs every 2 weeks). So if you want to recover deleted backup, you can run `git log --reflog` to search for the ones.
+Q: Do `backup delete` permanently deletes the backup?
+A: It will remove the git branch, but the underlying data will live until git garbage collection runs (which usually runs every 2 weeks). So if you want to recover deleted backup, you can run `git log --reflog` to search for the ones. Also, all deleted backups will be logged to the log file. Check the
+hash there and then manually tag them.
 
 ## Issues
 Hope you find this useful and like it. If you find any issues, please report or send PR.

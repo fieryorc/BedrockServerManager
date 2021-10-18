@@ -3,14 +3,18 @@ package svrmgr
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/golang/glog"
 )
+
+var ExitError = errors.New("exiting the session")
 
 // aliases list
 var aliases = map[string]string{
@@ -52,6 +56,8 @@ type ServerManager struct {
 	// Initialized and never nil.
 	serverProcess *Process
 	gw            *gitWrapper
+	stdin         io.Reader
+	stdout        io.Writer
 }
 
 // NewServerManager creates a new server manager
@@ -59,13 +65,25 @@ type ServerManager struct {
 func NewServerManager() *ServerManager {
 	sm := &ServerManager{}
 	sm.serverProcess = NewProcess(sm, nil)
-	sm.loadPlugings()
+	sm.stdin = os.Stdin
+	sm.stdout = os.Stdout
 
+	sm.loadPlugings()
 	wsDir := *gitWorkspaceDir
 	if wsDir == "" {
 		wsDir = filepath.Dir(getBedrockServerPath())
 	}
 	sm.gw = newGitWrapper(wsDir)
+
+	return sm
+}
+
+//newServerManagerForTests create new servermanager for tests.
+func newServerManagerForTests() *ServerManager {
+	sm := &ServerManager{}
+	sm.serverProcess = NewProcess(sm, nil)
+
+	sm.gw = newGitWrapper("dummy_git.exe")
 
 	return sm
 }
@@ -89,16 +107,13 @@ func (sm *ServerManager) printHelp() {
 }
 
 // Process - sart the main loop
-func (sm *ServerManager) Process(args []string) error {
-	reader := bufio.NewReader(os.Stdin)
+func (sm *ServerManager) Process(ctx context.Context, args []string) error {
+	reader := bufio.NewReader(sm.stdin)
 	sm.printHelp()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Main interactive promt and user input handling.
-	// TODO: Make it so that the server output automatically
-	// reprints the prompt. Also, print server status in the prompt.
+	// TODO: Make it so that the server output automatically reprints the prompt.
+	// TODO: Print server status in the prompt.
 	glog.Infof("handlers = %v", handlers)
 	for {
 		sm.Printf("> ")
@@ -111,6 +126,9 @@ func (sm *ServerManager) Process(args []string) error {
 			continue
 		}
 		if err = sm.handleCommand(ctx, cmd); err != nil {
+			if err == ExitError {
+				return nil
+			}
 			return err
 		}
 	}
@@ -140,5 +158,10 @@ func (sm *ServerManager) handleCommand(ctx context.Context, cmd string) error {
 	if err != nil {
 		sm.Log(err.Error())
 	}
+
+	if err == ExitError {
+		return err
+	}
+
 	return nil
 }

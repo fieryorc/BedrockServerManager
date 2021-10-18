@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -12,7 +13,9 @@ func main() {
 	flag.Parse()
 	glog.Error()
 	mgr := svrmgr.NewServerManager()
-	err := mgr.Process(os.Args)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := mgr.Process(ctx, os.Args)
 	if err != nil {
 		panic(err)
 	}
