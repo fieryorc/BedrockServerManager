@@ -12,6 +12,8 @@ import (
 	"github.com/golang/glog"
 )
 
+//go:generate mockgen -package svrmgr -source=git_wrapper.go -destination=git_wrapper_mocks_test.go
+
 var gitExecutable = flag.String("git_exe", "git.exe", "path to the git executable (if git.exe is not in the PATH)")
 var gitDryRun = flag.Bool("git_dry_run", false, "if specified, git update operations will not be performed")
 var commandTimeout = flag.Duration("git_command_timeout", time.Second*30, "Time to wait for git command to complete")
@@ -52,7 +54,7 @@ func (gr GitReference) String() string {
 
 // GitWrapper provides wrapper for git.
 type GitWrapper interface {
-	RunCommand(ctx context.Context, args ...string) (string, error)
+	RunGitCommand(ctx context.Context, args ...string) (string, error)
 	IsDirClean(ctx context.Context) (bool, error)
 	DeleteBranches(ctx context.Context, provider Provider, refs []GitReference) error
 	GetCurrentHead(context.Context) (GitReference, error)
@@ -78,9 +80,9 @@ func newGitWrapper(wsDir string) *gitWrapper {
 	}
 }
 
-// RunCommand runs git command and returs the results.
+// RunGitCommand runs git command and returs the results.
 // Output is not printed to the console.
-func (gw *gitWrapper) RunCommand(ctx context.Context, args ...string) (string, error) {
+func (gw *gitWrapper) RunGitCommand(ctx context.Context, args ...string) (string, error) {
 	ctxTimeout, _ := context.WithTimeout(ctx, *commandTimeout)
 	cmd := exec.CommandContext(ctxTimeout, gw.exe, args...)
 	cmd.Dir = gw.wsDir
@@ -105,12 +107,13 @@ func (gw *gitWrapper) RunCommand(ctx context.Context, args ...string) (string, e
 
 // IsDirClean returns true if the git directory is clean.
 func (gw *gitWrapper) IsDirClean(ctx context.Context) (bool, error) {
-	out, err := gw.RunCommand(ctx, "status")
+	out, err := gw.RunGitCommand(ctx, "status")
 	glog.Info("git status:")
 	glog.Infof(out)
 	if err != nil {
 		return false, err
 	}
+
 	return strings.Contains(out, "nothing to commit, working tree clean"), nil
 }
 
@@ -120,7 +123,7 @@ func (gw *gitWrapper) GetCurrentHead(ctx context.Context) (GitReference, error) 
 		"HEAD",
 	}
 
-	out, err := gw.RunCommand(ctx, cmdArgs...)
+	out, err := gw.RunGitCommand(ctx, cmdArgs...)
 	if err != nil {
 		return GitReference{}, err
 	}
@@ -133,7 +136,7 @@ func (gw *gitWrapper) Checkout(ctx context.Context, gr GitReference) error {
 		gr.Ref,
 	}
 
-	_, err := gw.RunCommand(ctx, cmdArgs...)
+	_, err := gw.RunGitCommand(ctx, cmdArgs...)
 	if err != nil {
 		return err
 	}
@@ -154,7 +157,7 @@ func (gw *gitWrapper) ListBranches(ctx context.Context, provider Provider, filte
 		cmdArgs = append(cmdArgs, filters...)
 	}
 
-	out, err := gw.RunCommand(ctx, cmdArgs...)
+	out, err := gw.RunGitCommand(ctx, cmdArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +222,7 @@ func (gw *gitWrapper) DeleteBranches(ctx context.Context, provider Provider, bra
 	}
 
 	cmdArgs = append(cmdArgs, branchList...)
-	out, err := gw.RunCommand(ctx, cmdArgs...)
+	out, err := gw.RunGitCommand(ctx, cmdArgs...)
 	if err != nil {
 		provider.Log(fmt.Sprintf("git branch -D failed. %s", out))
 		return err

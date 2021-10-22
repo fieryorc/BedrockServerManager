@@ -21,6 +21,5 @@ func (h *stopHandler) Handle(ctx context.Context, provider Provider, cmd []strin
 	if err = proc.Kill(); err != nil {
 		return fmt.Errorf("unable to stop server")
 	}
-	provider.ResetServerProcess()
 	return nil
 }

@@ -28,7 +28,10 @@ func (h *statusHandler) Handle(ctx context.Context, provider Provider, cmd []str
 		wsState = "dirty"
 	}
 
-	provider.Log(fmt.Sprintf(`server is %s, workspace is %s`, serverState, wsState))
-	provider.RunCommand(ctx, "backup status")
+	bhI, _ := provider.GetHandler("backup")
+	bh := bhI.(*backupHandler)
+	backupStatus := bh.Status(ctx, provider)
+
+	provider.Log(fmt.Sprintf(`server is %s, workspace is %s, %s`, serverState, wsState, backupStatus))
 	return nil
 }

@@ -11,18 +11,29 @@ import (
 	"github.com/golang/glog"
 )
 
+//go:generate mockgen -package svrmgr -source=provider.go -destination=provider_mocks_test.go
+
 // Provider implements the common functionality required by
 // plugins.
 type Provider interface {
+	// Println prints bare output to consle.
 	Println(str string)
+	// Printf prints bare output to consle.
 	Printf(format string, args ...interface{})
+	// Printfln prints bare output to consle.
 	Printfln(format string, args ...interface{})
+	// Log output to the console. Prints timestamp along with it.
 	Log(line string)
+	// RunCommand runs the command.
 	RunCommand(ctx context.Context, cmd string) error
-	SetServerProcess(sp *exec.Cmd)
-	GetServerProcess() *Process
-	ResetServerProcess()
+	// InitServer initializes the bedrock server wrapper.
+	InitServer(ctx context.Context, path, cwd string, args []string) ServerProcess
+	// GetServerProcess returns the server process wrapper.
+	GetServerProcess() ServerProcess
+	// GitWrapper returns the wrapper for git.
 	GitWrapper() GitWrapper
+	// GetHandler returns the handler for the command.
+	GetHandler(cmd string) (Handler, error)
 }
 
 func (sm *ServerManager) Println(str string) {
@@ -50,18 +61,25 @@ func (sm *ServerManager) RunCommand(ctx context.Context, cmd string) error {
 	return sm.handleCommand(ctx, cmd)
 }
 
-func (sm *ServerManager) SetServerProcess(cmd *exec.Cmd) {
-	sm.serverProcess.cmd = cmd
-}
-
-func (sm *ServerManager) GetServerProcess() *Process {
+func (sm *ServerManager) InitServer(ctx context.Context, path, dir string, args []string) ServerProcess {
+	cmd := exec.CommandContext(ctx, path)
+	cmd.Dir = dir
+	sm.serverProcess.SetCmd(cmd)
 	return sm.serverProcess
 }
 
-func (sm *ServerManager) ResetServerProcess() {
-	sm.serverProcess.cmd = nil
+func (sm *ServerManager) GetServerProcess() ServerProcess {
+	return sm.serverProcess
 }
 
 func (sm *ServerManager) GitWrapper() GitWrapper {
 	return sm.gw
+}
+
+func (sm *ServerManager) GetHandler(name string) (Handler, error) {
+	h, ok := handlers[name]
+	if !ok {
+		return nil, fmt.Errorf("handler %v not found", name)
+	}
+	return h, nil
 }

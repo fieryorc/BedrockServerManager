@@ -14,6 +14,8 @@ import (
 	"github.com/golang/glog"
 )
 
+//go:generate mockgen -package svrmgr -source=svrmgr.go -destination=svrmgr_mocks_test.go
+
 var ExitError = errors.New("exiting the session")
 
 // aliases list
@@ -54,8 +56,8 @@ func Register(cmd string, handler Handler) {
 type ServerManager struct {
 	// Maintains the bedrock server info.
 	// Initialized and never nil.
-	serverProcess *Process
-	gw            *gitWrapper
+	serverProcess ServerProcess
+	gw            GitWrapper
 	stdin         io.Reader
 	stdout        io.Writer
 }
@@ -82,8 +84,6 @@ func NewServerManager() *ServerManager {
 func newServerManagerForTests() *ServerManager {
 	sm := &ServerManager{}
 	sm.serverProcess = NewProcess(sm, nil)
-
-	sm.gw = newGitWrapper("dummy_git.exe")
 
 	return sm
 }

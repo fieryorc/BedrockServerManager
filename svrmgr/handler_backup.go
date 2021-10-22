@@ -68,8 +68,6 @@ func (h *backupHandler) Handle(ctx context.Context, provider Provider, cmd []str
 		return h.Clean(ctx, provider, cmd[2:])
 	case "delete":
 		return h.Delete(ctx, provider, cmd[2:])
-	case "status":
-		return h.Status(ctx, provider)
 	case "prune":
 		return h.Prune(ctx, provider, cmd[2:])
 	default:
@@ -111,7 +109,7 @@ func (h *backupHandler) Restore(ctx context.Context, provider Provider, args []s
 	}
 
 	ctxTimeout, _ := context.WithTimeout(ctx, *commandTimeout)
-	_, err = provider.GitWrapper().RunCommand(ctxTimeout, "checkout", gitHash)
+	_, err = provider.GitWrapper().RunGitCommand(ctxTimeout, "checkout", gitHash)
 	if err != nil {
 		return err
 	}
@@ -187,29 +185,6 @@ func (h *backupHandler) Clean(ctx context.Context, provider Provider, args []str
 	return nil
 }
 
-// Status returns the current state.
-func (h *backupHandler) Status(ctx context.Context, provider Provider) error {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	isClean, err := provider.GitWrapper().IsDirClean(ctx)
-	if err != nil {
-		return err
-	}
-	if isClean {
-		provider.Log("clean. no changes since last backup/restore")
-	} else {
-		provider.Log("there are changes since last backup/restore")
-	}
-
-	if h.backupInterval == 0 {
-		provider.Log("automatic backup disabled")
-	} else {
-		provider.Log(fmt.Sprintf("automatic backup interval: %v", h.backupInterval))
-	}
-	return nil
-}
-
 // Delete the specified backup
 // Wildcards are not supported
 func (h *backupHandler) Delete(ctx context.Context, provider Provider, args []string) error {
@@ -260,6 +235,19 @@ func (h *backupHandler) Prune(ctx context.Context, provider Provider, args []str
 		return err
 	}
 	return provider.GitWrapper().DeleteBranches(ctx, provider, prunedBranches)
+}
+
+// Status returns the current backup status.
+// Called by other modules.
+func (h *backupHandler) Status(ctx context.Context, provider Provider) string {
+	output := ""
+	if h.backupInterval == 0 {
+		output += "automatic backup disabled"
+	} else {
+		output += fmt.Sprintf("automatic backup interval: %v", h.backupInterval)
+	}
+
+	return output
 }
 
 func (h *backupHandler) save(ctx context.Context, provider Provider, bt backupType, msg string) error {
@@ -320,7 +308,7 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, bt
 	}
 
 	ctxTimeout, _ := context.WithTimeout(ctx, *commandTimeout)
-	out, err := provider.GitWrapper().RunCommand(ctxTimeout, "add", ".")
+	out, err := provider.GitWrapper().RunGitCommand(ctxTimeout, "add", ".")
 	if err != nil {
 		provider.Log(out)
 		return err
@@ -332,14 +320,14 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, bt
 	}
 
 	branch := fmt.Sprintf("saves/%s/%s", bt, time.Now().Local().Format("20060102-150405"))
-	out, err = provider.GitWrapper().RunCommand(ctxTimeout, "checkout", "--orphan", branch)
+	out, err = provider.GitWrapper().RunGitCommand(ctxTimeout, "checkout", "--orphan", branch)
 	if err != nil {
 		provider.Log(out)
 		provider.Log(fmt.Sprintf("backup failed. %v", err))
 		return err
 	}
 
-	out, err = provider.GitWrapper().RunCommand(ctxTimeout, "commit", "--allow-empty", "-m", description)
+	out, err = provider.GitWrapper().RunGitCommand(ctxTimeout, "commit", "--allow-empty", "-m", description)
 	if err != nil {
 		provider.Log(out)
 		provider.Log(fmt.Sprintf("backup failed. %v", err))

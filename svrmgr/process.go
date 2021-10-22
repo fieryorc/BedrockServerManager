@@ -12,6 +12,8 @@ import (
 	"github.com/golang/glog"
 )
 
+//go:generate mockgen -package svrmgr -source=process.go -destination=process_mocks_test.go
+
 var maxLineLength = flag.Int("server_output_line_limit", 100, "max line length for server output. longer lines will be truncated to this size")
 
 // LogLine represents a single line of the log
@@ -20,8 +22,8 @@ type LogLine struct {
 	Time time.Time
 }
 
-// Process encapsulates the bedrock server running process.
-type Process struct {
+// serverProcess encapsulates the bedrock server running process.
+type serverProcess struct {
 	provider     Provider
 	cmd          *exec.Cmd
 	stdOut       io.ReadCloser
@@ -31,16 +33,31 @@ type Process struct {
 	outputReader chan string // When set, the output is sent to this channel.
 }
 
+type ServerProcess interface {
+	SetCmd(cmd *exec.Cmd)
+	SendInput(line string) error
+	StartReadOutput(c chan string)
+	EndReadOutput()
+	Start(ctx context.Context, provider Provider) error
+	IsRunning() bool
+	Kill() error
+}
+
 // NewProcess creates new process.
-func NewProcess(provider Provider, cmd *exec.Cmd) *Process {
-	return &Process{
+func NewProcess(provider Provider, cmd *exec.Cmd) *serverProcess {
+	return &serverProcess{
 		provider: provider,
 		cmd:      cmd,
 	}
 }
 
+// SetCmd sets the underlying command.
+func (proc *serverProcess) SetCmd(cmd *exec.Cmd) {
+	proc.cmd = cmd
+}
+
 // SendInput sends input to the running server.
-func (proc *Process) SendInput(line string) error {
+func (proc *serverProcess) SendInput(line string) error {
 	if !proc.IsRunning() {
 		return fmt.Errorf("server not running. cannot send input")
 	}
@@ -57,12 +74,12 @@ func (proc *Process) SendInput(line string) error {
 
 // StartReadOutput sets the reader channel.
 // All subsequent output from the server will be sent to this channel.
-func (proc *Process) StartReadOutput(c chan string) {
+func (proc *serverProcess) StartReadOutput(c chan string) {
 	proc.outputReader = c
 }
 
 // EndReadOutput resets the output reader.
-func (proc *Process) EndReadOutput() {
+func (proc *serverProcess) EndReadOutput() {
 	if proc.outputReader != nil {
 		close(proc.outputReader)
 		proc.outputReader = nil
@@ -70,7 +87,7 @@ func (proc *Process) EndReadOutput() {
 }
 
 // Start the server process.
-func (proc *Process) Start(ctx context.Context, provider Provider) error {
+func (proc *serverProcess) Start(ctx context.Context, provider Provider) error {
 	var err error
 
 	if proc.IsRunning() {
@@ -99,12 +116,12 @@ func (proc *Process) Start(ctx context.Context, provider Provider) error {
 }
 
 // IsRunning returns true if the server is running.
-func (proc *Process) IsRunning() bool {
+func (proc *serverProcess) IsRunning() bool {
 	return proc.cmd != nil && proc.cmd.Process != nil && proc.cmd.ProcessState == nil
 }
 
 // Kill the running server process.
-func (proc *Process) Kill() error {
+func (proc *serverProcess) Kill() error {
 	if proc.IsRunning() {
 		glog.Infof("killing bedrock server")
 		return proc.cmd.Process.Kill()
@@ -115,7 +132,7 @@ func (proc *Process) Kill() error {
 // handleStdOut should be run in its own go routine.
 // Reads the server output and does the necessary processing.
 // All server output is automatically printed to the console with timestamp.
-func (proc *Process) handleStdOut(provider Provider, stdOut io.ReadCloser, capture bool) {
+func (proc *serverProcess) handleStdOut(provider Provider, stdOut io.ReadCloser, capture bool) {
 	scanner := bufio.NewScanner(stdOut)
 	scanner.Split(bufio.ScanLines)
 	for scanner.Scan() {
@@ -132,7 +149,7 @@ func (proc *Process) handleStdOut(provider Provider, stdOut io.ReadCloser, captu
 }
 
 // processOutputLine writes line to the console.
-func (proc *Process) processOutputLine(provider Provider, line string) {
+func (proc *serverProcess) processOutputLine(provider Provider, line string) {
 	glog.Infof(line)
 	if len(line) > *maxLineLength {
 		line = line[:*maxLineLength] + " ..."

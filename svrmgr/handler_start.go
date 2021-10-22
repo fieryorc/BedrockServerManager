@@ -17,6 +17,8 @@ type startHandler struct {
 	bedrockPath string
 }
 
+var serverOutputMarker = "[INFO] IPv6 supported, port:"
+
 var bedrockServerExecutable = flag.String("bedrock_exe", "bedrock_server.exe", "Bedrock executable path. Defaults to current directory")
 
 func initStartHandler(prov Provider) {
@@ -57,28 +59,30 @@ func (h *startHandler) Handle(ctx context.Context, provider Provider, command []
 		return fmt.Errorf("server already running")
 	}
 
+	glog.Infof("initializing server")
 	cwd, _ := os.Getwd()
-	cmd := exec.CommandContext(ctx, h.bedrockPath)
-	cmd.Dir = cwd
-	provider.SetServerProcess(cmd)
+	proc := provider.InitServer(ctx, h.bedrockPath, cwd, nil)
 
 	ch := make(chan string)
-	provider.GetServerProcess().StartReadOutput(ch)
-	defer provider.GetServerProcess().EndReadOutput()
+	proc.StartReadOutput(ch)
+	defer proc.EndReadOutput()
 
-	err := provider.GetServerProcess().Start(ctx, provider)
+	glog.Infof("starting server")
+	err := proc.Start(ctx, provider)
 	if err != nil {
 		return err
 	}
 
+	glog.Infof("waiting for server to start")
 	count := 0
 	for {
 		l, ok := <-ch
+		glog.Infof("server output: %v", l)
 		if !ok {
 			return fmt.Errorf("failed to start the server")
 		}
 		// Second port message indicates server fully started.
-		if strings.Contains(l, "[INFO] IPv6 supported, port:") {
+		if strings.Contains(l, serverOutputMarker) {
 			count += 1
 			if count == 2 {
 				glog.Infof("server started successfully")
