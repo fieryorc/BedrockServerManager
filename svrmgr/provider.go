@@ -16,6 +16,8 @@ import (
 // Provider implements the common functionality required by
 // plugins.
 type Provider interface {
+	// Register plugin handler
+	Register(cmd string, handler Handler)
 	// Println prints bare output to consle.
 	Println(str string)
 	// Printf prints bare output to consle.
@@ -34,6 +36,12 @@ type Provider interface {
 	GitWrapper() GitWrapper
 	// GetHandler returns the handler for the command.
 	GetHandler(cmd string) (Handler, error)
+}
+
+// Register a handler for given command.
+func (sm *ServerManager) Register(cmd string, handler Handler) {
+	glog.Infof("Registering handler for %s", cmd)
+	sm.handlers[cmd] = handler
 }
 
 func (sm *ServerManager) Println(str string) {
@@ -77,7 +85,7 @@ func (sm *ServerManager) GitWrapper() GitWrapper {
 }
 
 func (sm *ServerManager) GetHandler(name string) (Handler, error) {
-	h, ok := handlers[name]
+	h, ok := sm.handlers[name]
 	if !ok {
 		return nil, fmt.Errorf("handler %v not found", name)
 	}

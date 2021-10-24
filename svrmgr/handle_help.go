@@ -9,7 +9,7 @@ import (
 type helpHandler struct{}
 
 func initHelpHandler(provider Provider) {
-	Register("help", &helpHandler{})
+	provider.Register("help", &helpHandler{})
 }
 
 func (h *helpHandler) Handle(ctx context.Context, provider Provider, cmd []string) error {

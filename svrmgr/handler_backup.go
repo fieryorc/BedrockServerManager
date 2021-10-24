@@ -15,6 +15,9 @@ import (
 
 var autoBackupInterval = flag.Duration("backup_interval", time.Minute*30, "automatic backup interval.")
 
+const backupSaveCompletedMarker = "Data saved. Files are now ready to be copied"
+const FormatBackupTimestamp = "20060102-150405"
+
 type backupType string
 
 const (
@@ -32,18 +35,20 @@ type backupHandler struct {
 	lock           sync.Mutex    // All operations are atomic.
 	timer          *time.Timer   // Periodic backup timer
 	backupInterval time.Duration // Automatic backup interval.
+	nowFn          func() time.Time
 }
 
 // initBackupHandler initializes the backup plugin and starts the
 // periodic backup.
-func initBackupHandler(prov Provider) {
+func initBackupHandler(provider Provider) {
 	bh := &backupHandler{
 		timer: time.NewTimer(time.Hour), // Will be reset immediately.
+		nowFn: time.Now,
 	}
-	bh.setPeriod(context.Background(), prov, *autoBackupInterval)
+	bh.setPeriod(context.Background(), provider, *autoBackupInterval)
 
-	Register("backup", bh)
-	go bh.runBackupLoop(context.Background(), prov)
+	provider.Register("backup", bh)
+	go bh.runBackupLoop(context.Background(), provider)
 }
 
 // Handle handles the main logic.
@@ -274,7 +279,7 @@ func (h *backupHandler) save(ctx context.Context, provider Provider, bt backupTy
 		// Read the data from channel until we get ready message.
 		case l := <-ch:
 			glog.Infof("got from channel: %v", l)
-			if strings.Contains(l, "Data saved. Files are now ready to be copied") {
+			if strings.Contains(l, backupSaveCompletedMarker) {
 				// Read the next line. This is the list of files
 				<-ch
 				if err = h.backupWithGit(ctx, provider, bt, msg); err != nil {
@@ -319,7 +324,7 @@ func (h *backupHandler) backupWithGit(ctx context.Context, provider Provider, bt
 		panic("backup description not set")
 	}
 
-	branch := fmt.Sprintf("saves/%s/%s", bt, time.Now().Local().Format("20060102-150405"))
+	branch := fmt.Sprintf("saves/%s/%s", bt, h.nowFn().Local().Format(FormatBackupTimestamp))
 	out, err = provider.GitWrapper().RunGitCommand(ctxTimeout, "checkout", "--orphan", branch)
 	if err != nil {
 		provider.Log(out)
@@ -388,18 +393,20 @@ func (h *backupHandler) getDeletionCanditates(
 	ctx context.Context,
 	provider Provider,
 	branches []GitReference,
-	cutoffTime time.Duration,
+	cutoffDuration time.Duration,
 	pruneInterval time.Duration) ([]GitReference, error) {
+	glog.Infof("starting pruning: cutoff duration = %v", cutoffDuration)
 
 	if len(branches) == 0 {
 		return branches, nil
 	}
 
 	var result []GitReference
-	cutOffDate := time.Now().Add(-cutoffTime)
+	cutOffDate := h.nowFn().Add(-cutoffDuration)
 	lastSkippedBranch := branches[0]
+	glog.Infof("pruning: cutoff date: %v", cutOffDate)
 	for _, gr := range branches {
-		glog.Infof("processing: %v", gr)
+		glog.Infof("processing: %v, %v", gr, gr.CommitDate)
 
 		// First skip all refs that are newer than startTime.
 		if gr.CommitDate.After(cutOffDate) {

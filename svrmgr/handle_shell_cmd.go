@@ -13,8 +13,8 @@ import (
 // Commands will be passed to OS and run (not shell).
 type shellCmdHandler struct{}
 
-func initShellCmdHandler(prov Provider) {
-	Register("shell", &shellCmdHandler{})
+func initShellCmdHandler(provider Provider) {
+	provider.Register("shell", &shellCmdHandler{})
 }
 
 func (h *shellCmdHandler) Handle(ctx context.Context, provider Provider, args []string) error {

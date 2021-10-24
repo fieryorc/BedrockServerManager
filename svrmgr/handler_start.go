@@ -21,8 +21,8 @@ var serverOutputMarker = "[INFO] IPv6 supported, port:"
 
 var bedrockServerExecutable = flag.String("bedrock_exe", "bedrock_server.exe", "Bedrock executable path. Defaults to current directory")
 
-func initStartHandler(prov Provider) {
-	Register("start", &startHandler{
+func initStartHandler(provider Provider) {
+	provider.Register("start", &startHandler{
 		bedrockPath: getBedrockServerPath(),
 	})
 }

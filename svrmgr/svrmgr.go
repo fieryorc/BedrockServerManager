@@ -16,7 +16,8 @@ import (
 
 //go:generate mockgen -package svrmgr -source=svrmgr.go -destination=svrmgr_mocks_test.go
 
-var ExitError = errors.New("exiting the session")
+// ErrExit is returned when the app exits.
+var ErrExit = errors.New("exiting the session")
 
 // aliases list
 var aliases = map[string]string{
@@ -43,17 +44,10 @@ type Handler interface {
 	Handle(ctx context.Context, provider Provider, cmd []string) error
 }
 
-// List of all registered handlers
-var handlers = map[string]Handler{}
-
-// Register a handler for given command.
-func Register(cmd string, handler Handler) {
-	glog.Infof("Registering handler for %s", cmd)
-	handlers[cmd] = handler
-}
-
 // ServerManager contains the main server manager logic
 type ServerManager struct {
+	// List of all registered handlers
+	handlers map[string]Handler
 	// Maintains the bedrock server info.
 	// Initialized and never nil.
 	serverProcess ServerProcess
@@ -69,6 +63,7 @@ func NewServerManager() *ServerManager {
 	sm.serverProcess = NewProcess(sm, nil)
 	sm.stdin = os.Stdin
 	sm.stdout = os.Stdout
+	sm.handlers = map[string]Handler{}
 
 	sm.loadPlugings()
 	wsDir := *gitWorkspaceDir
@@ -84,6 +79,7 @@ func NewServerManager() *ServerManager {
 func newServerManagerForTests() *ServerManager {
 	sm := &ServerManager{}
 	sm.serverProcess = NewProcess(sm, nil)
+	sm.handlers = map[string]Handler{}
 
 	return sm
 }
@@ -114,7 +110,7 @@ func (sm *ServerManager) Process(ctx context.Context, args []string) error {
 	// Main interactive promt and user input handling.
 	// TODO: Make it so that the server output automatically reprints the prompt.
 	// TODO: Print server status in the prompt.
-	glog.Infof("handlers = %v", handlers)
+	glog.Infof("handlers = %v", sm.handlers)
 	for {
 		sm.Printf("> ")
 		cmd, err := reader.ReadString('\n')
@@ -126,7 +122,7 @@ func (sm *ServerManager) Process(ctx context.Context, args []string) error {
 			continue
 		}
 		if err = sm.handleCommand(ctx, cmd); err != nil {
-			if err == ExitError {
+			if err == ErrExit {
 				return nil
 			}
 			return err
@@ -147,7 +143,7 @@ func (sm *ServerManager) handleCommand(ctx context.Context, cmd string) error {
 		glog.Infof("expanded alias to '%s'", strings.Join(parts, " "))
 	}
 
-	h, ok := handlers[parts[0]]
+	h, ok := sm.handlers[parts[0]]
 	if !ok {
 		sm.Log(fmt.Sprintf("invalid command '%s'\n", parts[0]))
 		return nil
@@ -159,7 +155,7 @@ func (sm *ServerManager) handleCommand(ctx context.Context, cmd string) error {
 		sm.Log(err.Error())
 	}
 
-	if err == ExitError {
+	if err == ErrExit {
 		return err
 	}
 

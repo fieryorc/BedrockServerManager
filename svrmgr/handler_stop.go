@@ -8,8 +8,8 @@ import (
 // stopHandler - Stop running server.
 type stopHandler struct{}
 
-func initStopHandler(prov Provider) {
-	Register("stop", &stopHandler{})
+func initStopHandler(provider Provider) {
+	provider.Register("stop", &stopHandler{})
 }
 
 func (h *stopHandler) Handle(ctx context.Context, provider Provider, cmd []string) error {

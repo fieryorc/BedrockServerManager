@@ -13,7 +13,7 @@ import (
 type serverCmdHandler struct{}
 
 func initServerCmdHandler(provider Provider) {
-	Register("server", &serverCmdHandler{})
+	provider.Register("server", &serverCmdHandler{})
 }
 
 func (h *serverCmdHandler) Handle(ctx context.Context, provider Provider, args []string) error {

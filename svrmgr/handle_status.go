@@ -9,7 +9,7 @@ import (
 type statusHandler struct{}
 
 func initStatusHandler(provider Provider) {
-	Register("status", &statusHandler{})
+	provider.Register("status", &statusHandler{})
 }
 
 func (h *statusHandler) Handle(ctx context.Context, provider Provider, cmd []string) error {
