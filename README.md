@@ -118,7 +118,7 @@ A: This is intentional to allow cleanup of older backups. All backups are stored
    
 Q: My backups are taking lots of space. How do free up some space? 
 A: First delete the unnecessary backups using `backup delete` or `backup prune` commands. You can then run git garbage collection
-   by running `$ git gc --prune=now` to free up disk space.
+   by running `$ git reflog expire --all --expire-unreachable=now` and then `$ git gc --prune=now` to free up disk space.
 
 Q: Can you clean up periodic backups automatically?
 A: Yes, try `backup prune` command.
