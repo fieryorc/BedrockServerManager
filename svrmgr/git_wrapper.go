@@ -150,7 +150,7 @@ func (gw *gitWrapper) ListBranches(ctx context.Context, provider Provider, filte
 	cmdArgs := []string{
 		"branch",
 		"-av",
-		"--format=%(refname:lstrip=2)$XYX$%(objectname:short)$XYX$%(contents:subject)$XYX$%(committerdate)$XYX$%(committerdate:relative)$XYX$%(if)%(HEAD)%(then)*%(end)$XYX$",
+		"--format=%(refname:lstrip=2)$XYX$%(objectname:short)$XYX$%(contents:subject)$XYX$%(committerdate:iso)$XYX$%(committerdate:relative)$XYX$%(if)%(HEAD)%(then)*%(end)$XYX$",
 		"--list",
 	}
 	if len(filters) > 0 {
@@ -170,7 +170,7 @@ func (gw *gitWrapper) ListBranches(ctx context.Context, provider Provider, filte
 			continue
 		}
 		comps := strings.Split(l, "$XYX$")
-		commitDate, err := time.Parse("Mon Jan 02 15:04:05 2006 -0700", comps[3])
+		commitDate, err := time.Parse("2006-01-02 15:04:05 -0700", comps[3])
 		if err != nil {
 			return nil, fmt.Errorf("invalid date from git.. internal error. %v", err)
 		}
